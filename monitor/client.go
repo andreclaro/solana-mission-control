@@ -20,7 +20,7 @@ func addQueryParameters(req *http.Request, queryParams types.QueryParams) {
 	req.URL.RawQuery = params.Encode()
 }
 
-//newHTTPRequest to make a new http request
+// newHTTPRequest to make a new http request
 func newHTTPRequest(ops types.HTTPOptions) (*http.Request, error) {
 	// make new request
 	payloadBytes, _ := json.Marshal(ops.Body)
@@ -41,7 +41,7 @@ func newHTTPRequest(ops types.HTTPOptions) (*http.Request, error) {
 	return req, nil
 }
 
-//newHTTPRequest to make a new http request
+// newHTTPRequest to make a new http request
 func newRequest(ops types.HTTPOptions, cfg *config.Config) (*http.Request, error) {
 	// make new request
 	payloadBytes, _ := json.Marshal(ops.Body)

@@ -32,7 +32,6 @@ func SendEmailAlert(msg string, cfg *config.Config) error {
 	return nil
 }
 
-
 // SendSlackAlert sends alert to a slack webhook
 func SendSlackAlert(msg string, cfg *config.Config) error {
 	if strings.ToUpper(strconv.FormatBool(cfg.EnableAlerts.EnableSlackAlerts)) == "TRUE" {

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Chainflow/solana-mission-control/config"
 	"github.com/Chainflow/solana-mission-control/exporter"
 	"github.com/Chainflow/solana-mission-control/monitor"
+	"github.com/Chainflow/solana-mission-control/utils"
 )
 
 func main() {
@@ -44,18 +46,32 @@ func main() {
 	if strings.EqualFold(cfg.AlerterPreferences.StartupAlerts, "yes") {
 		currEpoch := monitor.GetEpochDetails(cfg)
 
+		activatedStake := float64(-1)
+		voteAccs, err := monitor.GetVoteAccounts(cfg, utils.Validator) // get vote accounts
+		if err != nil {
+			log.Printf("Error while getting vote accounts: %v", err)
+		} else {
+			for _, vote := range voteAccs.Result.Current {
+				if vote.NodePubkey == cfg.ValDetails.PubKey {
+					activatedStake = float64(vote.ActivatedStake) / math.Pow(10, 9)
+					break
+				}
+			}
+		}
+
 		// send alert
-		err = alerter.SendTelegramAlert(fmt.Sprintf("Solana Mission Control started up. Current Epoch Info:\n%s", currEpoch), cfg)
+		msg := fmt.Sprintf("Solana Mission Control started up. Current Epoch Info:\n%s\nActivated Stake: %.4f", currEpoch, activatedStake)
+		err = alerter.SendTelegramAlert(msg, cfg)
 		if err != nil {
 			log.Printf("Error while sending startup alert to telegram: %v", err)
 		}
 		// send email alert
-		err = alerter.SendEmailAlert(fmt.Sprintf("Solana Mission Control started up. Current Epoch Info:\n%s", currEpoch), cfg)
+		err = alerter.SendEmailAlert(msg, cfg)
 		if err != nil {
 			log.Printf("Error while sending startup alert to email: %v", err)
 		}
 		// send slack alert
-		err = alerter.SendSlackAlert(fmt.Sprintf("Solana Mission Control started up. Current Epoch Info:\n%s", currEpoch), cfg)
+		err = alerter.SendSlackAlert(msg, cfg)
 		if err != nil {
 			log.Printf("Error while sending startup alert to slack: %v", err)
 		}

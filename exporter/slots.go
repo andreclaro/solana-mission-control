@@ -218,7 +218,21 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 			c.lastEpoch = &resp.Result.Epoch
 		} else if *c.lastEpoch != resp.Result.Epoch {
 			if strings.EqualFold(cfg.AlerterPreferences.NewEpochAlerts, "yes") {
-				msg := fmt.Sprintf("New epoch started %d -> %d", *c.lastEpoch, resp.Result.Epoch)
+
+				activatedStake := float64(-1)
+				voteAccs, err := monitor.GetVoteAccounts(c.config, utils.Validator)
+				if err != nil {
+					log.Printf("Error while getting vote accounts: %v", err)
+				} else {
+					for _, vote := range voteAccs.Result.Current {
+						if vote.NodePubkey == c.config.ValDetails.PubKey {
+							activatedStake = float64(vote.ActivatedStake) / math.Pow(10, 9)
+							break
+						}
+					}
+				}
+
+				msg := fmt.Sprintf("New epoch started %d -> %d, new activated stake: %.4f", *c.lastEpoch, resp.Result.Epoch, activatedStake)
 				err = alerter.SendTelegramAlert(msg, cfg)
 				if err != nil {
 					log.Printf("Error while sending new epoch alert to telegram: %v", err)
