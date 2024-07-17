@@ -213,9 +213,10 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 			log.Printf("failed to fetch epoch info of network, retrying: %v", err)
 			// continue
 		} else {
+			newEpoch := resp.Result.Epoch
 			if c.lastEpoch == nil {
-				c.lastEpoch = &resp.Result.Epoch
-			} else if *c.lastEpoch != resp.Result.Epoch {
+				c.lastEpoch = &newEpoch
+			} else if *c.lastEpoch != newEpoch {
 				if strings.EqualFold(cfg.AlerterPreferences.NewEpochAlerts, "yes") {
 
 					activatedStake := float64(-1)
@@ -231,7 +232,7 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 						}
 					}
 
-					msg := fmt.Sprintf("New epoch started %d -> %d, new activated stake: %.4f", *c.lastEpoch, resp.Result.Epoch, activatedStake)
+					msg := fmt.Sprintf("New epoch started %d -> %d, new activated stake: %.4f", *c.lastEpoch, newEpoch, activatedStake)
 					err = alerter.SendTelegramAlert(msg, cfg)
 					if err != nil {
 						log.Printf("Error while sending new epoch alert to telegram: %v", err)
@@ -247,7 +248,7 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 						log.Printf("Error while sending new epoch alert to slack: %v", err)
 					}
 				}
-				c.lastEpoch = &resp.Result.Epoch
+				c.lastEpoch = &newEpoch
 			}
 		}
 
