@@ -102,6 +102,12 @@ func SendBalanceChangeAlert(currentBal int64, cfg *config.Config) error {
 				log.Printf("Error while sending account balance change alert to email: %v", err)
 				return err
 			}
+
+			err = alerter.SendSlackAlert(fmt.Sprintf("Account Balance Alert: Your account balance has dropped below configured threshold, current balance is : %s", current), cfg)
+			if err != nil {
+				log.Printf("Error while sending account balance change alert to slack: %v", err)
+				return err
+			}
 		}
 	}
 
@@ -129,6 +135,13 @@ func SendBalanceChangeAlert(currentBal int64, cfg *config.Config) error {
 					log.Printf("Error while sending delegation alert to email : %v", err)
 					return err
 				}
+
+				// Alert to slack
+				err = alerter.SendSlackAlert(fmt.Sprintf("Delegation Alert: Your account balance has changed form %s to %s", previous, current), cfg)
+				if err != nil {
+					log.Printf("Error while sending delegation alert to slack : %v", err)
+					return err
+				}
 			} else if diff < -50 { // check and change the condition
 				// Alert to telegram
 				err = alerter.SendTelegramAlert(fmt.Sprintf("Undelegation Alert: Your account balance has changed form %s to %s", previous, current), cfg)
@@ -141,6 +154,13 @@ func SendBalanceChangeAlert(currentBal int64, cfg *config.Config) error {
 				err = alerter.SendEmailAlert(fmt.Sprintf("Undelegation Alert: Your account balance has changed form %s to %s", previous, current), cfg)
 				if err != nil {
 					log.Printf("Error while sending undelegation alert to email : %v", err)
+					return err
+				}
+
+				// Alert to slack
+				err = alerter.SendSlackAlert(fmt.Sprintf("Undelegation Alert: Your account balance has changed form %s to %s", previous, current), cfg)
+				if err != nil {
+					log.Printf("Error while sending undelegation alert to slack : %v", err)
 					return err
 				}
 			}

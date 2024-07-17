@@ -52,6 +52,10 @@ func GetNodeHealth(cfg *config.Config) (float64, error) {
 				if err != nil {
 					log.Printf("Error while sending node health alert to email: %v", err)
 				}
+				err = alerter.SendSlackAlert(fmt.Sprintf("Your node is not running"), cfg)
+				if err != nil {
+					log.Printf("Error while sending node health alert to slack: %v", err)
+				}
 				h = 0
 			}
 		}

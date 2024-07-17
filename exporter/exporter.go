@@ -321,6 +321,12 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 			if emailErr != nil {
 				log.Printf("Error while sending validator status alert to email: %v", emailErr)
 			}
+
+			// Send Slack Alert
+			slackErr := alerter.SendSlackAlert(fmt.Sprintf("Your solana validator is in DELINQUENT state"), c.config)
+			if slackErr != nil {
+				log.Printf("Error while sending validator status alert to slack: %v", slackErr)
+			}
 		}
 	}
 }
@@ -376,11 +382,15 @@ func (c *solanaCollector) AlertValidatorStatus(msg string, ch chan<- prometheus.
 			if alreadySentAlert == "false" {
 				telegramErr := alerter.SendTelegramAlert(msg, c.config)
 				emailErr := alerter.SendEmailAlert(msg, c.config)
+				slackErr := alerter.SendSlackAlert(msg, c.config)
 				if telegramErr != nil {
 					log.Printf("Error while sending vallidator status alert to telegram: %v", telegramErr)
 				}
 				if emailErr != nil {
 					log.Printf("Error while sending validator status alert to email: %v", emailErr)
+				}
+				if slackErr != nil {
+					log.Printf("Error while sending validator status alert to slack: %v", slackErr)
 				}
 				ch <- prometheus.MustNewConstMetric(c.statusAlertCount, prometheus.GaugeValue,
 					count, "true")

@@ -80,6 +80,10 @@ func SkipRateAlerts(cfg *config.Config) error {
 			if err != nil {
 				log.Printf("Error while sending skip rate alert to email: %v", err)
 			}
+			err = alerter.SendSlackAlert(fmt.Sprintf("SKIP RATE ALERT ::  Your validator SKIP RATE : %f has exceeded network SKIP RATE : %f", valSkipped, netSkipped), cfg)
+			if err != nil {
+				log.Printf("Error while sending skip rate alert to slack: %v", err)
+			}
 		}
 	}
 	return nil

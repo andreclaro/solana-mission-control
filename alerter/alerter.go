@@ -23,3 +23,14 @@ type emailAlert struct{}
 func NewEmailAlerter() *emailAlert {
 	return &emailAlert{}
 }
+
+// Slack to send slack alert
+type Slack interface {
+	SendSlackMessage(msg, webhookURL string) error
+}
+
+type slackAlert struct{}
+
+func NewSlackAlerter() *slackAlert {
+	return &slackAlert{}
+}

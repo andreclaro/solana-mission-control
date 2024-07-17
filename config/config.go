@@ -31,6 +31,12 @@ type (
 		SendgridName string `mapstructure:"sendgrid_account_name"`
 	}
 
+	// Slack bot details struct
+	Slack struct {
+		// WebhookURL is the slack webhook to post messages
+		WebhookURL string `mapstructure:"webhook_url"`
+	}
+
 	// Scraper defines the time intervals for multiple scrapers to fetch the data
 	Scraper struct {
 		// Rate is to call and get the data for specified targets on that particular time interval
@@ -69,6 +75,8 @@ type (
 		EnableTelegramAlerts bool `mapstructure:"enable_telegram_alerts"`
 		// EnableTelegramAlerts which takes an option to enable/disable emial alerts
 		EnableEmailAlerts bool `mapstructure:"enable_email_alerts"`
+		// EnableSlackAlerts which takes an option to enable/disable slack alerts
+		EnableSlackAlerts bool `mapstructure:"enable_slack_alerts"`
 	}
 
 	// RegularStatusAlerts defines time-slots to receive validator status alerts
@@ -124,6 +132,7 @@ type (
 		Scraper             Scraper             `mapstructure:"scraper"`
 		Telegram            Telegram            `mapstructure:"telegram"`
 		SendGrid            SendGrid            `mapstructure:"sendgrid"`
+		Slack               Slack               `mapstructure:"slack"`
 		Prometheus          Prometheus          `mapstructure:"prometheus"`
 	}
 )
