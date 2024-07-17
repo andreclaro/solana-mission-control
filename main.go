@@ -47,7 +47,7 @@ func main() {
 		currEpoch := monitor.GetEpochDetails(cfg)
 
 		activatedStake := float64(-1)
-		voteAccs, err := monitor.GetVoteAccounts(cfg, utils.Validator) // get vote accounts
+		voteAccs, err := monitor.GetVoteAccounts(cfg, utils.Network)
 		if err != nil {
 			log.Printf("Error while getting vote accounts: %v", err)
 		} else {
