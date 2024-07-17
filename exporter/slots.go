@@ -212,43 +212,43 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 		if err != nil {
 			log.Printf("failed to fetch epoch info of network, retrying: %v", err)
 			// continue
-		}
+		} else {
+			if c.lastEpoch == nil {
+				c.lastEpoch = &resp.Result.Epoch
+			} else if *c.lastEpoch != resp.Result.Epoch {
+				if strings.EqualFold(cfg.AlerterPreferences.NewEpochAlerts, "yes") {
 
-		if c.lastEpoch == nil {
-			c.lastEpoch = &resp.Result.Epoch
-		} else if *c.lastEpoch != resp.Result.Epoch {
-			if strings.EqualFold(cfg.AlerterPreferences.NewEpochAlerts, "yes") {
-
-				activatedStake := float64(-1)
-				voteAccs, err := monitor.GetVoteAccounts(c.config, utils.Validator)
-				if err != nil {
-					log.Printf("Error while getting vote accounts: %v", err)
-				} else {
-					for _, vote := range voteAccs.Result.Current {
-						if vote.NodePubkey == c.config.ValDetails.PubKey {
-							activatedStake = float64(vote.ActivatedStake) / math.Pow(10, 9)
-							break
+					activatedStake := float64(-1)
+					voteAccs, err := monitor.GetVoteAccounts(c.config, utils.Network)
+					if err != nil {
+						log.Printf("Error while getting vote accounts: %v", err)
+					} else {
+						for _, vote := range voteAccs.Result.Current {
+							if vote.NodePubkey == c.config.ValDetails.PubKey {
+								activatedStake = float64(vote.ActivatedStake) / math.Pow(10, 9)
+								break
+							}
 						}
 					}
-				}
 
-				msg := fmt.Sprintf("New epoch started %d -> %d, new activated stake: %.4f", *c.lastEpoch, resp.Result.Epoch, activatedStake)
-				err = alerter.SendTelegramAlert(msg, cfg)
-				if err != nil {
-					log.Printf("Error while sending new epoch alert to telegram: %v", err)
+					msg := fmt.Sprintf("New epoch started %d -> %d, new activated stake: %.4f", *c.lastEpoch, resp.Result.Epoch, activatedStake)
+					err = alerter.SendTelegramAlert(msg, cfg)
+					if err != nil {
+						log.Printf("Error while sending new epoch alert to telegram: %v", err)
+					}
+					// send email alert
+					err = alerter.SendEmailAlert(msg, cfg)
+					if err != nil {
+						log.Printf("Error while sending new epoch alert to email: %v", err)
+					}
+					// send slack alert
+					err = alerter.SendSlackAlert(msg, cfg)
+					if err != nil {
+						log.Printf("Error while sending new epoch alert to slack: %v", err)
+					}
 				}
-				// send email alert
-				err = alerter.SendEmailAlert(msg, cfg)
-				if err != nil {
-					log.Printf("Error while sending new epoch alert to email: %v", err)
-				}
-				// send slack alert
-				err = alerter.SendSlackAlert(msg, cfg)
-				if err != nil {
-					log.Printf("Error while sending new epoch alert to slack: %v", err)
-				}
+				c.lastEpoch = &resp.Result.Epoch
 			}
-			c.lastEpoch = &resp.Result.Epoch
 		}
 
 		networkEpoch.Set(float64(resp.Result.Epoch))             // Set nw epoch
