@@ -59,7 +59,7 @@ type (
 		NetworkRPC string `mapstructure:"network_rpc"`
 	}
 
-	// ValDetails stores the validator meta details
+	// ValDetails stores the validator metn details
 	ValDetails struct {
 		// ValidatorName is the moniker of your validator which will be used to display in alerts messages
 		ValidatorName string `mapstructure:"validator_name"`
@@ -104,6 +104,10 @@ type (
 		// SkipRateAlerts which takes an option to enable/disable skip rate alerts, on enable sends alerts if validator skip rate
 		// exceeds network skip rate
 		SkipRateAlerts string `mapstructure:"skip_rate_alerts"`
+		// StartupAlerts which takes an option to enable/disable startup alerts, on enable sends alerts at the start of the validator
+		StartupAlerts string `mapstructure:"startup_alerts"`
+		// NewEpochAlerts which takes an option to enable/disable new epoch alerts, on enable sends alerts when a new epoch starts
+		NewEpochAlerts string `mapstructure:"new_epoch_alerts"`
 	}
 
 	// AlertingThreshold defines threshold condition for different alert-cases.

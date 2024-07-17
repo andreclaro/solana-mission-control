@@ -22,6 +22,8 @@ node_health_alert = "yes"
 epoch_diff_alrets = "yes"
 account_balance_change_alerts = "yes"
 skip_rate_alerts = "yes"
+startup_alerts = "yes"
+new_epoch_alerts = "yes"
 
 [alerting_threholds]
 block_diff_threshold = 10

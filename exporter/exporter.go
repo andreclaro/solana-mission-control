@@ -56,6 +56,7 @@ type solanaCollector struct {
 	blockTimeDiff      *prometheus.Desc
 	voteAccBalance     *prometheus.Desc
 	identityAccBalance *prometheus.Desc
+	lastEpoch          *int64
 }
 
 // NewSolanaCollector exports solana collector metrics to prometheus
@@ -213,7 +214,9 @@ func (c *solanaCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 // mustEmitMetrics gets the data from Current and Deliquent validator vote accounts and export metrics of validator Vote account to prometheus.
-//  Those metrics are
+//
+//	Those metrics are
+//
 // 1. Current validator's info
 // 2. Deliquent validator's info
 // 3. Curent validator node key and vote key

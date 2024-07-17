@@ -214,6 +214,29 @@ func (c *solanaCollector) WatchSlots(cfg *config.Config) {
 			// continue
 		}
 
+		if c.lastEpoch == nil {
+			c.lastEpoch = &resp.Result.Epoch
+		} else if *c.lastEpoch != resp.Result.Epoch {
+			if strings.EqualFold(cfg.AlerterPreferences.NewEpochAlerts, "yes") {
+				msg := fmt.Sprintf("New epoch started %d -> %d", *c.lastEpoch, resp.Result.Epoch)
+				err = alerter.SendTelegramAlert(msg, cfg)
+				if err != nil {
+					log.Printf("Error while sending new epoch alert to telegram: %v", err)
+				}
+				// send email alert
+				err = alerter.SendEmailAlert(msg, cfg)
+				if err != nil {
+					log.Printf("Error while sending new epoch alert to email: %v", err)
+				}
+				// send slack alert
+				err = alerter.SendSlackAlert(msg, cfg)
+				if err != nil {
+					log.Printf("Error while sending new epoch alert to slack: %v", err)
+				}
+			}
+			c.lastEpoch = &resp.Result.Epoch
+		}
+
 		networkEpoch.Set(float64(resp.Result.Epoch))             // Set nw epoch
 		networkBlockHeight.Set(float64(resp.Result.BlockHeight)) // set nw block height
 
