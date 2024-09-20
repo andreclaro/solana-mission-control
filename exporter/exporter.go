@@ -57,6 +57,8 @@ type solanaCollector struct {
 	blockTimeDiff      *prometheus.Desc
 	voteAccBalance     *prometheus.Desc
 	identityAccBalance *prometheus.Desc
+	identityPubKey     *prometheus.Desc
+	activeNode         *prometheus.Desc
 	lastEpoch          *int64
 }
 
@@ -191,6 +193,11 @@ func NewSolanaCollector(cfg *config.Config) *solanaCollector {
 			"Identity account balance",
 			[]string{"solana_identity_acc_bal"}, nil,
 		),
+		activeNode: prometheus.NewDesc(
+			"solana_active_node",
+			"Indicates whether the Solana node is active (1) or inactive (0)",
+			[]string{"identity"}, nil,
+		),
 	}
 
 }
@@ -217,6 +224,7 @@ func (c *solanaCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.blockTimeDiff
 	ch <- c.voteAccBalance
 	ch <- c.identityAccBalance
+	ch <- c.activeNode
 }
 
 // mustEmitMetrics gets the data from Current and Deliquent validator vote accounts and export metrics of validator Vote account to prometheus.
@@ -436,6 +444,7 @@ func (c *solanaCollector) AlertValidatorStatus(msg string, ch chan<- prometheus.
 // 7. IP address
 // 8. Total transaction count
 // 9. Get current block time and previous block time and difference of both.
+// 10. Node identity pubkey
 func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 	accs, err := monitor.GetVoteAccounts(c.config, utils.Validator) // get vote accounts
 	if err != nil {
@@ -448,6 +457,8 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 		c.mustEmitMetrics(ch, accs) // emit vote account metrics
 	}
 
+	log.Printf("Collecting Metrics")
+
 	// get version
 	version, err := monitor.GetVersion(c.config)
 	// if err != nil {
@@ -455,6 +466,17 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 	// } else {}
 	if version.Result.SolanaCore != "" {
 		ch <- prometheus.MustNewConstMetric(c.solanaVersion, prometheus.GaugeValue, 1, version.Result.SolanaCore)
+	}
+
+	identity, err := monitor.GetIdentity(c.config)
+	if err != nil {
+		log.Printf("Error while getting node identity: %v", err)
+	} else {
+		activeNodeValue := 0.0
+		if identity.Result.Identity == c.config.ValDetails.PubKey {
+			activeNodeValue = 1.0
+		}
+		ch <- prometheus.MustNewConstMetric(c.activeNode, prometheus.GaugeValue, activeNodeValue, identity.Result.Identity)
 	}
 
 	// get identity account balance
@@ -549,6 +571,7 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 	txcount := utils.NearestThousandFormat(float64(count.Result))
 
 	ch <- prometheus.MustNewConstMetric(c.txCount, prometheus.GaugeValue, float64(count.Result), txcount)
+
 }
 
 // getClusterNodeInfo returns gossip address of node
