@@ -11,7 +11,7 @@ import (
 
 	"github.com/Chainflow/solana-mission-control/alerter"
 	"github.com/Chainflow/solana-mission-control/config"
-	"github.com/Chainflow/solana-mission-control/querier"
+	// "github.com/Chainflow/solana-mission-control/querier"
 	"github.com/Chainflow/solana-mission-control/types"
 )
 
@@ -77,11 +77,12 @@ func GetVoteAccBalance(cfg *config.Config) (types.Balance, error) {
 // SendBalanceChangeAlert checks balance and DBbalance, If balance dropped to threshold,
 // sends Alerts to the validator
 func SendBalanceChangeAlert(currentBal int64, cfg *config.Config) error {
-	prevBal, err := querier.GetAccountBalFromDB(cfg)
-	if err != nil {
-		log.Printf("Error while getting bal from db : %v", err)
-		return err
-	}
+	prevBal := "";
+	// prevBal, err := querier.GetAccountBalFromDB(cfg)
+	// if err != nil {
+	// 	log.Printf("Error while getting bal from db : %v", err)
+	// 	return err
+	// }
 
 	// c := float64(currentBal) / math.Pow(10, 9)
 	c := fmt.Sprintf("%.4f", float64(currentBal)/math.Pow(10, 9))
@@ -91,7 +92,7 @@ func SendBalanceChangeAlert(currentBal int64, cfg *config.Config) error {
 
 	if strings.EqualFold(cfg.AlerterPreferences.AccountBalanceChangeAlerts, "yes") {
 		if cBal < cfg.AlertingThresholds.BalanaceChangeThreshold {
-			err = alerter.SendTelegramAlert(fmt.Sprintf("Account Balance Alert: Your account balance has dropped below configured threshold, current balance is : %s", current), cfg)
+			err := alerter.SendTelegramAlert(fmt.Sprintf("Account Balance Alert: Your account balance has dropped below configured threshold, current balance is : %s", current), cfg)
 			if err != nil {
 				log.Printf("Error while sending account balance change alert to telegram : %v", err)
 				return err
