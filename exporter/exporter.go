@@ -255,11 +255,18 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 	var epochvote float64
 	var valresult float64
 
+	// Get epoch info once and reuse it for all vote accounts
+	epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
+	if err != nil {
+		log.Printf("Error while getting epoch info : %v", err)
+	}
+	currentEpoch := epochInfo.Result.Epoch
+
 	var runningCurrentCredits, runningPreviousCredits float64
 	var currentCreditsCount, previousCreditsCount int64
 	// current vote account information
 	for _, vote := range response.Result.Current {
-		cCredits, pCredits := c.calcualteEpochVoteCredits(vote.EpochCredits)
+		cCredits, pCredits := c.calcualteEpochVoteCreditsWithEpoch(vote.EpochCredits, currentEpoch)
 		if cCredits != 0 && pCredits != 0 {
 			runningCurrentCredits += cCredits
 			runningPreviousCredits += pCredits
@@ -315,7 +322,6 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 	avgPreviousCredits := runningPreviousCredits / float64(previousCreditsCount)
 	ch <- prometheus.MustNewConstMetric(c.networkVoteCredits, prometheus.GaugeValue, avgCurrentCredits, "current")
 	ch <- prometheus.MustNewConstMetric(c.networkVoteCredits, prometheus.GaugeValue, avgPreviousCredits, "previous")
-
 
 	// delinquent vote account information
 	for _, vote := range response.Result.Delinquent {
@@ -376,6 +382,23 @@ func (c *solanaCollector) calcualteEpochVoteCredits(credits [][]int64) (float64,
 	}
 
 	// log.Printf("Current Epoch : %d\n Current Epoch Vote Credits: %d\n Previous Epoch Vote Credits : %d\n", epoch, currentCredits, previousCredits)
+
+	return float64(currentCredits), float64(previousCredits)
+}
+
+// calculateEpochVoteCreditsWithEpoch returns epoch credits of vote account
+func (c *solanaCollector) calcualteEpochVoteCreditsWithEpoch(credits [][]int64, epoch int64) (float64, float64) {
+	var currentCredits, previousCredits int64
+
+	for _, c := range credits {
+		if len(c) >= 3 {
+			if c[0] == epoch {
+				currentCredits = c[1]
+				previousCredits = c[2]
+				break
+			}
+		}
+	}
 
 	return float64(currentCredits), float64(previousCredits)
 }
