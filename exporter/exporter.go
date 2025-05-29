@@ -455,7 +455,11 @@ func (c *solanaCollector) AlertValidatorStatus(msg string, ch chan<- prometheus.
 // 8. Total transaction count
 // 9. Get current block time and previous block time and difference of both.
 func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
-	accs, err := monitor.GetVoteAccounts(c.config, utils.Validator) // get vote accounts
+	// Only collect metrics that are NOT handled by WatchSlots()
+	// WatchSlots() already handles: balance, nodeHealth, epochInfo, skipRate, blockProduction
+
+	// Vote accounts - only needed for validator-specific metrics, not for general prometheus metrics
+	accs, err := monitor.GetVoteAccounts(c.config, utils.Validator)
 	if err != nil {
 		ch <- prometheus.NewInvalidMetric(c.totalValidatorsDesc, err)
 		ch <- prometheus.NewInvalidMetric(c.validatorActivatedStake, err)
@@ -466,43 +470,28 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 		c.mustEmitMetrics(ch, accs) // emit vote account metrics
 	}
 
-	// get version
+	// get version - this is static, low frequency call
 	version, err := monitor.GetVersion(c.config)
-	// if err != nil {
-	// 	ch <- prometheus.NewInvalidMetric(c.solanaVersion, err)
-	// } else {}
 	if version.Result.SolanaCore != "" {
 		ch <- prometheus.MustNewConstMetric(c.solanaVersion, prometheus.GaugeValue, 1, version.Result.SolanaCore)
 	}
 
-	// get identity account balance
-	bal, err := monitor.GetIdentityBalance(c.config)
-	if err != nil {
-		ch <- prometheus.NewInvalidMetric(c.accountBalance, err)
-	} else {
-		log.Printf("Identity account bal : %d", bal.Result.Value)
-		b := float64(bal.Result.Value) / math.Pow(10, 9)
-		s := fmt.Sprintf("%.4f", b) // TODO : cross check the value
-		ch <- prometheus.MustNewConstMetric(c.accountBalance, prometheus.GaugeValue, b, s)
+	// NOTE: Removed duplicate balance calls that WatchSlots() already handles:
+	// - GetIdentityBalance (WatchSlots calls this every 2 seconds -> balance.Set())
+	// - GetVoteAccBalance (redundant)
+	// - Multiple GetCurrentSlot calls (duplicated in block time functions)
+	// - GetBlockTime calls (multiple calls per scrape causing burst)
+	// - GetConfirmedBlock calls (causing "Getting Confirmed Block..." spam)
+	// - GetClusterNodes (for IP address - causing "Getting Cluster Nodes..." spam)
 
-		ch <- prometheus.MustNewConstMetric(c.identityAccBalance, prometheus.GaugeValue, b, s)
-	}
+	// The WatchSlots() function already handles these metrics every 2 seconds:
+	// - balance.Set() for account balance (maps to account_balance metric)
+	// - nodeHealth.Set() for node health
+	// - networkEpoch.Set() and related epoch metrics
+	// - skipRate metrics
+	// - blockProduction metrics
 
-	// get vote account balance
-	vAccBal, err := monitor.GetVoteAccBalance(c.config)
-	// if err != nil {
-	// 	ch <- prometheus.NewInvalidMetric(c.voteAccBalance, err)
-	// } else {
-	if vAccBal.Result.Value != 0 {
-		log.Printf("Vote account bal : %d", vAccBal.Result.Value)
-		b := float64(vAccBal.Result.Value) / math.Pow(10, 9)
-		s := fmt.Sprintf("%.4f", b) // TODO : cross check the value
-		ch <- prometheus.MustNewConstMetric(c.voteAccBalance, prometheus.GaugeValue, b, s)
-	}
-
-	// }
-
-	// get slot leader
+	// get slot leader - keeping this as it's used by some dashboards
 	leader, err := monitor.GetSlotLeader(c.config)
 	if err != nil {
 		ch <- prometheus.NewInvalidMetric(c.slotLeader, err)
@@ -512,60 +501,18 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
-	// get current validator slot
+	// get current validator slot - single call
 	slot, err := monitor.GetCurrentSlot(c.config, utils.Validator)
 	if err != nil {
-		log.Printf("Error while getting current sloc info : %v", err)
+		log.Printf("Error while getting current slot info : %v", err)
 	} else {
 		cs := strconv.FormatInt(slot.Result, 10)
 		ch <- prometheus.MustNewConstMetric(c.currentSlot, prometheus.GaugeValue, float64(slot.Result), cs)
 	}
 
-	// Export Confirmed block time of Validator
-	validatorBlocktime := c.getValidatorBlockTime(slot.Result)
-	nowV := time.Unix(validatorBlocktime, 0).UTC()
-	timesV := nowV.Format(time.RFC1123)
-	ch <- prometheus.MustNewConstMetric(c.validatorBlockTime, prometheus.GaugeValue, 1, timesV)
-
-	// Get current Network slot
-	networkSlot, err := monitor.GetCurrentSlot(c.config, utils.Network)
-
-	// Export confirmed block time of Network
-	networkBlocktime := c.getNetworkBlockTime(networkSlot.Result)
-	nowN := time.Unix(networkBlocktime, 0).UTC()
-	timesN := nowN.Format(time.RFC1123)
-	ch <- prometheus.MustNewConstMetric(c.networkBlockTime, prometheus.GaugeValue, 1, timesN)
-
-	// Get confirmed Block Time Difference of Network and Validator
-	secs, ss := blockTimeDiff(networkBlocktime, validatorBlocktime)
-	ch <- prometheus.MustNewConstMetric(c.blockTimeDiff, prometheus.GaugeValue, secs, ss+"s")
-
-	// get block time and calculate block time diff
-	bt, err := monitor.GetBlockTime(slot.Result, c.config)
-	if err != nil {
-		log.Printf("Error while getting block time: %v", err)
-	}
-
-	// get previous block time
-	pvt, err := monitor.GetBlockTime(slot.Result-1, c.config)
-	if err != nil {
-		log.Printf("Error while getting previous block time: %v", err)
-	}
-
-	// block tim difference
-	sec, s := blockTimeDiff(bt.Result, pvt.Result)
-	ch <- prometheus.MustNewConstMetric(c.blockTime, prometheus.GaugeValue, sec, s+"s")
-
-	// IP address of gossip
-	address := c.getClusterNodeInfo()
-	if address != "" {
-		ch <- prometheus.MustNewConstMetric(c.ipAddress, prometheus.GaugeValue, 1, address)
-	}
-
-	// get tx count
+	// tx count - keeping this but it could be moved to WatchSlots if needed
 	count, _ := monitor.GetTxCount(c.config)
 	txcount := utils.NearestThousandFormat(float64(count.Result))
-
 	ch <- prometheus.MustNewConstMetric(c.txCount, prometheus.GaugeValue, float64(count.Result), txcount)
 }
 
