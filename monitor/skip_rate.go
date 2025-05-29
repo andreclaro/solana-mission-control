@@ -11,7 +11,6 @@ import (
 	"github.com/Chainflow/solana-mission-control/alerter"
 	"github.com/Chainflow/solana-mission-control/config"
 	"github.com/Chainflow/solana-mission-control/types"
-	"github.com/Chainflow/solana-mission-control/utils"
 )
 
 var (
@@ -20,6 +19,7 @@ var (
 
 func SkipRate(cfg *config.Config) (float64, float64, error) {
 	var valSkipped, netSkipped, totalSkipped float64
+	var validatorCount int64
 
 	if solanaBinaryPath == "" {
 		solanaBinaryPath = "solana"
@@ -46,17 +46,12 @@ func SkipRate(cfg *config.Config) (float64, float64, error) {
 			valSkipped = val.SkipRate
 		}
 		totalSkipped = totalSkipped + val.SkipRate
+		validatorCount++
 	}
 
-	voteAccounts, err := GetVoteAccounts(cfg, utils.Network)
-	if err != nil {
-		log.Printf("Error while getting vote accounts : %v", err)
-	}
-
-	if &voteAccounts.Result != nil {
-		currentVal := len(voteAccounts.Result.Current)
-
-		netSkipped = totalSkipped / float64(currentVal)
+	// Calculate network skip rate directly from CLI data instead of making RPC call
+	if validatorCount > 0 {
+		netSkipped = totalSkipped / float64(validatorCount)
 	}
 
 	log.Printf("VAL skip rate : %f, Network skip rate : %f", valSkipped, netSkipped)
