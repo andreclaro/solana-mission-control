@@ -33,7 +33,7 @@ func SkipRate(cfg *config.Config) (float64, float64, error) {
 
 	log.Printf("Solana binary path (skip rate) : %s (%s)", solanaBinaryPath, cluster)
 
-	cmd := exec.Command(solanaBinaryPath, "validators", clusterFlag, "--output", "json", clusterFlag)
+	cmd := exec.Command(solanaBinaryPath, "validators", "--output", "json", clusterFlag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Error while running solana validators cli command %v", err)

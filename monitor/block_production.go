@@ -33,7 +33,7 @@ func BlockProduction(cfg *config.Config) (RecentBlock, error) {
 		clusterFlag = "-ut"
 	}
 
-	cmd := exec.Command(solanaBinaryPath, "block-production", clusterFlag, "--output", "json", clusterFlag)
+	cmd := exec.Command(solanaBinaryPath, "block-production", "--output", "json", clusterFlag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Error while running solana validators cli command %v", err)
