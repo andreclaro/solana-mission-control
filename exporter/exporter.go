@@ -58,6 +58,11 @@ type solanaCollector struct {
 	voteAccBalance     *prometheus.Desc
 	identityAccBalance *prometheus.Desc
 	lastEpoch          *int64
+	// Cache fields to reduce redundant API calls
+	cachedEpochInfo    *types.EpochInfo
+	cachedEpochTime    time.Time
+	cachedVoteAccounts *types.GetVoteAccountsResponse
+	cachedVoteAccTime  time.Time
 }
 
 // NewSolanaCollector exports solana collector metrics to prometheus
@@ -256,17 +261,25 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 	var valresult float64
 
 	// Get epoch info once and reuse it for all vote accounts
-	epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
+	_, err := c.getCachedEpochInfo()
 	if err != nil {
 		log.Printf("Error while getting epoch info : %v", err)
 	}
-	currentEpoch := epochInfo.Result.Epoch
+
+	// Get network vote info from the response data we already have
+	var netresult float64
+	for _, vote := range response.Result.Current {
+		if vote.NodePubkey == c.config.ValDetails.PubKey {
+			netresult = float64(vote.LastVote)
+			break
+		}
+	}
 
 	var runningCurrentCredits, runningPreviousCredits float64
 	var currentCreditsCount, previousCreditsCount int64
 	// current vote account information
 	for _, vote := range response.Result.Current {
-		cCredits, pCredits := c.calcualteEpochVoteCreditsWithEpoch(vote.EpochCredits, currentEpoch)
+		cCredits, pCredits := c.calcualteEpochVoteCredits(vote.EpochCredits)
 		if cCredits != 0 && pCredits != 0 {
 			runningCurrentCredits += cCredits
 			runningPreviousCredits += pCredits
@@ -307,7 +320,6 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 			}
 			valresult = float64(vote.LastVote)
 			ch <- prometheus.MustNewConstMetric(c.valVoteHeight, prometheus.GaugeValue, valresult, "validator")
-			netresult := c.getNetworkVoteAccountinfo()
 			ch <- prometheus.MustNewConstMetric(c.netVoteHeight, prometheus.GaugeValue, netresult, "network")
 			diff := netresult - valresult
 			ch <- prometheus.MustNewConstMetric(c.voteHeightDiff, prometheus.GaugeValue, diff, "vote height difference")
@@ -363,7 +375,7 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 
 // calculateEpochVoteCredits returns epoch credits of vote account
 func (c *solanaCollector) calcualteEpochVoteCredits(credits [][]int64) (float64, float64) {
-	epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
+	epochInfo, err := c.getCachedEpochInfo()
 	if err != nil {
 		log.Printf("Error while getting epoch info : %v", err)
 	}
@@ -382,23 +394,6 @@ func (c *solanaCollector) calcualteEpochVoteCredits(credits [][]int64) (float64,
 	}
 
 	// log.Printf("Current Epoch : %d\n Current Epoch Vote Credits: %d\n Previous Epoch Vote Credits : %d\n", epoch, currentCredits, previousCredits)
-
-	return float64(currentCredits), float64(previousCredits)
-}
-
-// calculateEpochVoteCreditsWithEpoch returns epoch credits of vote account
-func (c *solanaCollector) calcualteEpochVoteCreditsWithEpoch(credits [][]int64, epoch int64) (float64, float64) {
-	var currentCredits, previousCredits int64
-
-	for _, c := range credits {
-		if len(c) >= 3 {
-			if c[0] == epoch {
-				currentCredits = c[1]
-				previousCredits = c[2]
-				break
-			}
-		}
-	}
 
 	return float64(currentCredits), float64(previousCredits)
 }
@@ -639,4 +634,21 @@ func blockTimeDiff(bt int64, pvt int64) (float64, string) {
 	sec, _ := strconv.ParseFloat(s, 64)
 
 	return sec, s
+}
+
+// getCachedEpochInfo returns cached epoch info or fetches new data if cache is expired
+func (c *solanaCollector) getCachedEpochInfo() (*types.EpochInfo, error) {
+	// Cache for 30 seconds
+	if c.cachedEpochInfo != nil && time.Since(c.cachedEpochTime) < 30*time.Second {
+		return c.cachedEpochInfo, nil
+	}
+
+	epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
+	if err != nil {
+		return nil, err
+	}
+
+	c.cachedEpochInfo = &epochInfo
+	c.cachedEpochTime = time.Now()
+	return &epochInfo, nil
 }
