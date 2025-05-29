@@ -15,6 +15,7 @@ import (
 
 var (
 	solanaBinaryPath = os.Getenv("SOLANA_BINARY_PATH")
+	cluster          = os.Getenv("CLUSTER")
 )
 
 func SkipRate(cfg *config.Config) (float64, float64, error) {
@@ -25,9 +26,14 @@ func SkipRate(cfg *config.Config) (float64, float64, error) {
 		solanaBinaryPath = "solana"
 	}
 
-	log.Printf("Solana binary path : %s", solanaBinaryPath)
+	clusterFlag := "-um"
+	if cluster == "testnet" {
+		clusterFlag = "-ut"
+	}
 
-	cmd := exec.Command(solanaBinaryPath, "validators", "--output", "json")
+	log.Printf("Solana binary path (skip rate) : %s (%s)", solanaBinaryPath, cluster)
+
+	cmd := exec.Command(solanaBinaryPath, "validators", clusterFlag, "--output", "json", clusterFlag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Error while running solana validators cli command %v", err)

@@ -26,9 +26,14 @@ func BlockProduction(cfg *config.Config) (RecentBlock, error) {
 		solanaBinaryPath = "solana"
 	}
 
-	log.Printf("Solana binary path : %s", solanaBinaryPath)
+	log.Printf("Solana binary path (block production) : %s (%s)", solanaBinaryPath, cluster)
 
-	cmd := exec.Command(solanaBinaryPath, "block-production", "--output", "json")
+	clusterFlag := "-um"
+	if cluster == "testnet" {
+		clusterFlag = "-ut"
+	}
+
+	cmd := exec.Command(solanaBinaryPath, "block-production", clusterFlag, "--output", "json", clusterFlag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Error while running solana validators cli command %v", err)
