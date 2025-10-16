@@ -21,6 +21,10 @@
    
       Vote key of the validator, which will be used to get vote account details such as balance.
 
+   - *accounts_to_track_balance*
+
+      A list of base-58 wallet addresses to track with getBalance and expose as Prometheus metrics under `solana_tracked_account_balance{address="..."}`.
+
 - **[enable_alerts]**
 
    - *enable_telegram_alerts*

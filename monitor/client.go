@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -76,6 +77,7 @@ func makeResponse(res *http.Response) (*types.PingResp, error) {
 
 // HitHTTPTarget to hit the target and get response
 func HitHTTPTarget(ops types.HTTPOptions) (*types.PingResp, error) {
+	start := time.Now()
 	req, err := newHTTPRequest(ops)
 	if err != nil {
 		return nil, err
@@ -90,6 +92,12 @@ func HitHTTPTarget(ops types.HTTPOptions) (*types.PingResp, error) {
 	res, err := makeResponse(resp)
 	if err != nil {
 		return nil, err
+	}
+
+	// Log slow requests (>2s) with method and endpoint for debugging latency
+	dur := time.Since(start)
+	if dur > 2*time.Second {
+		log.Printf("Slow RPC: method=%s url=%s took=%s status=%d", ops.Body.Method, ops.Endpoint, dur.String(), res.StatusCode)
 	}
 
 	return res, nil

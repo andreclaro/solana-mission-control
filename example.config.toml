@@ -6,6 +6,10 @@ network_rpc = "https://api.mainnet-beta.solana.com"
 validator_name = "val-name"
 pub_key = "ChjhgsdfmmKahsa1hQNiXYU84ULeaYF1EH15n"
 vote_key = "2oxQJ1qpgUZU9JU8sdwerasdf1GzHkYfRDgDQY9dpH5mgGn"
+accounts_to_track_balance = [
+  "ChjhgsdfmmKahsa1hQNiXYU84ULeaYF1EH15n",
+  "2oxQJ1qpgUZU9JU8sdwerasdf1GzHkYfRDgDQY9dpH5mgGn"
+]
 
 [enable_alerts]
 enable_telegram_alerts = true

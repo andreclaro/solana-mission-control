@@ -59,6 +59,7 @@ type solanaCollector struct {
 	identityAccBalance *prometheus.Desc
 	identityPubKey     *prometheus.Desc
 	activeNode         *prometheus.Desc
+	trackedAccBalance  *prometheus.Desc
 	lastEpoch          *int64
 }
 
@@ -193,6 +194,11 @@ func NewSolanaCollector(cfg *config.Config) *solanaCollector {
 			"Identity account balance",
 			[]string{"solana_identity_acc_bal"}, nil,
 		),
+		trackedAccBalance: prometheus.NewDesc(
+			"solana_tracked_account_balance",
+			"Balance of configured tracked accounts (SOL)",
+			[]string{"address"}, nil,
+		),
 		activeNode: prometheus.NewDesc(
 			"solana_active_node",
 			"Indicates whether the Solana node is active (1) or inactive (0)",
@@ -224,6 +230,7 @@ func (c *solanaCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.blockTimeDiff
 	ch <- c.voteAccBalance
 	ch <- c.identityAccBalance
+	ch <- c.trackedAccBalance
 	ch <- c.activeNode
 }
 
@@ -323,7 +330,6 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 	avgPreviousCredits := runningPreviousCredits / float64(previousCreditsCount)
 	ch <- prometheus.MustNewConstMetric(c.networkVoteCredits, prometheus.GaugeValue, avgCurrentCredits, "current")
 	ch <- prometheus.MustNewConstMetric(c.networkVoteCredits, prometheus.GaugeValue, avgPreviousCredits, "previous")
-
 
 	// delinquent vote account information
 	for _, vote := range response.Result.Delinquent {
@@ -505,6 +511,22 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	// }
+
+	// emit tracked accounts balances
+	for _, addr := range c.config.ValDetails.AccountsToTrackBalance {
+		if addr == "" {
+			continue
+		}
+		bal, err := monitor.GetAccountBalance(c.config, addr)
+		if err != nil {
+			log.Printf("Error while getting tracked account balance for %s: %v", addr, err)
+			continue
+		}
+		if bal.Result.Value >= 0 {
+			b := float64(bal.Result.Value) / math.Pow(10, 9)
+			ch <- prometheus.MustNewConstMetric(c.trackedAccBalance, prometheus.GaugeValue, b, addr)
+		}
+	}
 
 	// get slot leader
 	leader, err := monitor.GetSlotLeader(c.config)

@@ -67,6 +67,8 @@ type (
 		PubKey string `mapstructure:"pub_key"`
 		// VoteKey of validator as base-58 encoded string
 		VoteKey string `mapstructure:"vote_key"`
+		// AccountsToTrackBalance is a list of wallet addresses to track balances for (base-58)
+		AccountsToTrackBalance []string `mapstructure:"accounts_to_track_balance"`
 	}
 
 	// EnableAlerts struct which holds options to enalbe/disable alerts
