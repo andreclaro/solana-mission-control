@@ -83,7 +83,6 @@ func HitHTTPTarget(ops types.HTTPOptions) (*types.PingResp, error) {
 		return nil, err
 	}
 
-	httpcli := http.Client{Timeout: time.Duration(10 * time.Second)}
 	resp, err := httpcli.Do(req)
 	if err != nil {
 		return nil, err
@@ -101,4 +100,20 @@ func HitHTTPTarget(ops types.HTTPOptions) (*types.PingResp, error) {
 	}
 
 	return res, nil
+}
+
+var httpcli *http.Client
+
+func init() {
+	transport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	httpcli = &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
 }

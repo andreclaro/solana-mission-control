@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -61,11 +62,31 @@ type solanaCollector struct {
 	activeNode         *prometheus.Desc
 	trackedAccBalance  *prometheus.Desc
 	lastEpoch          *int64
+	// cache and synchronization
+	mu                       sync.RWMutex
+	cachedAccsValidator      types.GetVoteAccountsResponse
+	cachedAccsNetwork        types.GetVoteAccountsResponse
+	cachedVersion            types.Version
+	cachedIdentity           types.Identity
+	cachedIdentityBal        float64
+	cachedIdentityBalStr     string
+	cachedVoteAccBal         float64
+	cachedTracked            map[string]float64
+	cachedSlotLeader         string
+	cachedValidatorSlot      int64
+	cachedNetworkSlot        int64
+	cachedValidatorBlocktime int64
+	cachedNetworkBlocktime   int64
+	cachedBT                 int64
+	cachedPBT                int64
+	cachedGossip             string
+	cachedTxCount            int64
+	cachedEpoch              int64
 }
 
 // NewSolanaCollector exports solana collector metrics to prometheus
 func NewSolanaCollector(cfg *config.Config) *solanaCollector {
-	return &solanaCollector{
+	c := &solanaCollector{
 		config: cfg,
 		totalValidatorsDesc: prometheus.NewDesc(
 			"solana_active_validators",
@@ -205,7 +226,186 @@ func NewSolanaCollector(cfg *config.Config) *solanaCollector {
 			[]string{"identity"}, nil,
 		),
 	}
+	// init tracked cache map
+	c.cachedTracked = make(map[string]float64)
+	// start background cache refresher
+	go c.startCacheRefresher()
+	return c
+}
 
+// startCacheRefresher periodically refreshes cached values used by Collect.
+func (c *solanaCollector) startCacheRefresher() {
+	ticker := time.NewTicker(2 * time.Second)
+	for {
+		<-ticker.C
+		// Fetch in sequence; these run outside of /metrics path
+		// 1) Vote accounts (validator and network)
+		accsVal, errVal := monitor.GetVoteAccounts(c.config, utils.Validator)
+		if errVal != nil {
+			log.Printf("cache refresh: vote accounts (validator) error: %v", errVal)
+		}
+		accsNet, errNet := monitor.GetVoteAccounts(c.config, utils.Network)
+		if errNet != nil {
+			log.Printf("cache refresh: vote accounts (network) error: %v", errNet)
+		}
+
+		// 2) Version and identity
+		version, err := monitor.GetVersion(c.config)
+		if err != nil {
+			log.Printf("cache refresh: version error: %v", err)
+		}
+		identity, err := monitor.GetIdentity(c.config)
+		if err != nil {
+			log.Printf("cache refresh: identity error: %v", err)
+		}
+
+		// 3) Balances
+		idBalResp, err := monitor.GetIdentityBalance(c.config)
+		var idBal float64
+		var idBalStr string
+		if err != nil {
+			log.Printf("cache refresh: identity balance error: %v", err)
+		} else {
+			idBal = float64(idBalResp.Result.Value) / math.Pow(10, 9)
+			idBalStr = fmt.Sprintf("%.4f", idBal)
+		}
+
+		vBalResp, err := monitor.GetVoteAccBalance(c.config)
+		var vBal float64
+		if err != nil {
+			log.Printf("cache refresh: vote acc balance error: %v", err)
+		} else if vBalResp.Result.Value > 0 {
+			vBal = float64(vBalResp.Result.Value) / math.Pow(10, 9)
+		}
+
+		// 4) Tracked account balances
+		tracked := make(map[string]float64)
+		for _, addr := range c.config.ValDetails.AccountsToTrackBalance {
+			if addr == "" {
+				continue
+			}
+			resp, err := monitor.GetAccountBalance(c.config, addr)
+			if err != nil {
+				log.Printf("cache refresh: tracked balance %s error: %v", addr, err)
+				continue
+			}
+			tracked[addr] = float64(resp.Result.Value) / math.Pow(10, 9)
+		}
+
+		// 5) Slot leader and slots
+		leader, err := monitor.GetSlotLeader(c.config)
+		if err != nil {
+			log.Printf("cache refresh: slot leader error: %v", err)
+		}
+		vSlot, err := monitor.GetCurrentSlot(c.config, utils.Validator)
+		if err != nil {
+			log.Printf("cache refresh: validator slot error: %v", err)
+		}
+		nSlot, err := monitor.GetCurrentSlot(c.config, utils.Network)
+		if err != nil {
+			log.Printf("cache refresh: network slot error: %v", err)
+		}
+
+		// 6) Confirmed block times
+		var vBT, nBT int64
+		if vSlot.Result > 0 {
+			res, err := monitor.GetConfirmedBlock(c.config, vSlot.Result, utils.Validator)
+			if err == nil {
+				vBT = res.Result.BlockTime
+			}
+		}
+		if nSlot.Result > 0 {
+			res, err := monitor.GetConfirmedBlock(c.config, nSlot.Result, utils.Network)
+			if err == nil {
+				nBT = res.Result.BlockTime
+			}
+		}
+
+		// 7) Block time and previous block time (validator)
+		var bt, pbt int64
+		if vSlot.Result > 0 {
+			res, err := monitor.GetBlockTime(vSlot.Result, c.config)
+			if err == nil {
+				bt = res.Result
+			}
+			res2, err := monitor.GetBlockTime(vSlot.Result-1, c.config)
+			if err == nil {
+				pbt = res2.Result
+			}
+		}
+
+		// 8) Gossip IP
+		var gossip string
+		nodes, err := monitor.GetClusterNodes(c.config)
+		if err == nil {
+			for _, v := range nodes.Result {
+				if v.Pubkey == c.config.ValDetails.PubKey {
+					gossip = v.Gossip
+					break
+				}
+			}
+		}
+
+		// 9) Tx count
+		tx, err := monitor.GetTxCount(c.config)
+		var txc int64
+		if err == nil {
+			txc = tx.Result
+		}
+
+		// 10) Epoch info (validator)
+		epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
+		var epoch int64
+		if err == nil {
+			epoch = epochInfo.Result.Epoch
+		}
+
+		// Commit to cache atomically
+		c.mu.Lock()
+		if errVal == nil {
+			c.cachedAccsValidator = accsVal
+		}
+		if errNet == nil {
+			c.cachedAccsNetwork = accsNet
+		}
+		c.cachedVersion = version
+		c.cachedIdentity = identity
+		c.cachedIdentityBal = idBal
+		c.cachedIdentityBalStr = idBalStr
+		c.cachedVoteAccBal = vBal
+		c.cachedTracked = tracked
+		if leader.Result != "" {
+			c.cachedSlotLeader = leader.Result
+		}
+		if vSlot.Result > 0 {
+			c.cachedValidatorSlot = vSlot.Result
+		}
+		if nSlot.Result > 0 {
+			c.cachedNetworkSlot = nSlot.Result
+		}
+		if vBT > 0 {
+			c.cachedValidatorBlocktime = vBT
+		}
+		if nBT > 0 {
+			c.cachedNetworkBlocktime = nBT
+		}
+		if bt > 0 {
+			c.cachedBT = bt
+		}
+		if pbt > 0 {
+			c.cachedPBT = pbt
+		}
+		if gossip != "" {
+			c.cachedGossip = gossip
+		}
+		if txc > 0 {
+			c.cachedTxCount = txc
+		}
+		if epoch > 0 {
+			c.cachedEpoch = epoch
+		}
+		c.mu.Unlock()
+	}
 }
 
 // Desribe exports metrics to the channel
@@ -371,12 +571,9 @@ func (c *solanaCollector) mustEmitMetrics(ch chan<- prometheus.Metric, response 
 
 // calculateEpochVoteCredits returns epoch credits of vote account
 func (c *solanaCollector) calcualteEpochVoteCredits(credits [][]int64) (float64, float64) {
-	epochInfo, err := monitor.GetEpochInfo(c.config, utils.Validator)
-	if err != nil {
-		log.Printf("Error while getting epoch info : %v", err)
-	}
-
-	epoch := epochInfo.Result.Epoch
+	c.mu.RLock()
+	epoch := c.cachedEpoch
+	c.mu.RUnlock()
 	var currentCredits, previousCredits int64
 
 	for _, c := range credits {
@@ -452,32 +649,37 @@ func (c *solanaCollector) AlertValidatorStatus(msg string, ch chan<- prometheus.
 // 9. Get current block time and previous block time and difference of both.
 // 10. Node identity pubkey
 func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
-	accs, err := monitor.GetVoteAccounts(c.config, utils.Validator) // get vote accounts
-	if err != nil {
-		ch <- prometheus.NewInvalidMetric(c.totalValidatorsDesc, err)
-		ch <- prometheus.NewInvalidMetric(c.validatorActivatedStake, err)
-		ch <- prometheus.NewInvalidMetric(c.validatorLastVote, err)
-		ch <- prometheus.NewInvalidMetric(c.validatorRootSlot, err)
-		ch <- prometheus.NewInvalidMetric(c.validatorDelinquent, err)
-	} else {
-		c.mustEmitMetrics(ch, accs) // emit vote account metrics
+	start := time.Now()
+	c.mu.RLock()
+	accs := c.cachedAccsValidator
+	version := c.cachedVersion
+	identity := c.cachedIdentity
+	idBal := c.cachedIdentityBal
+	idBalStr := c.cachedIdentityBalStr
+	voteBal := c.cachedVoteAccBal
+	tracked := make(map[string]float64, len(c.cachedTracked))
+	for k, v := range c.cachedTracked {
+		tracked[k] = v
+	}
+	leader := c.cachedSlotLeader
+	vSlot := c.cachedValidatorSlot
+	vBT := c.cachedValidatorBlocktime
+	nBT := c.cachedNetworkBlocktime
+	bt := c.cachedBT
+	pbt := c.cachedPBT
+	address := c.cachedGossip
+	txc := c.cachedTxCount
+	c.mu.RUnlock()
+
+	if accs.Result.Current != nil || accs.Result.Delinquent != nil {
+		c.mustEmitMetrics(ch, accs)
 	}
 
-	log.Printf("Collecting Metrics")
-
-	// get version
-	version, err := monitor.GetVersion(c.config)
-	// if err != nil {
-	// 	ch <- prometheus.NewInvalidMetric(c.solanaVersion, err)
-	// } else {}
 	if version.Result.SolanaCore != "" {
 		ch <- prometheus.MustNewConstMetric(c.solanaVersion, prometheus.GaugeValue, 1, version.Result.SolanaCore)
 	}
 
-	identity, err := monitor.GetIdentity(c.config)
-	if err != nil {
-		log.Printf("Error while getting node identity: %v", err)
-	} else {
+	if identity.Result.Identity != "" {
 		activeNodeValue := 0.0
 		if identity.Result.Identity == c.config.ValDetails.PubKey {
 			activeNodeValue = 1.0
@@ -485,115 +687,60 @@ func (c *solanaCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.activeNode, prometheus.GaugeValue, activeNodeValue, identity.Result.Identity)
 	}
 
-	// get identity account balance
-	bal, err := monitor.GetIdentityBalance(c.config)
-	if err != nil {
-		ch <- prometheus.NewInvalidMetric(c.accountBalance, err)
-	} else {
-		log.Printf("Identity account bal : %d", bal.Result.Value)
-		b := float64(bal.Result.Value) / math.Pow(10, 9)
-		s := fmt.Sprintf("%.4f", b) // TODO : cross check the value
-		ch <- prometheus.MustNewConstMetric(c.accountBalance, prometheus.GaugeValue, b, s)
-
-		ch <- prometheus.MustNewConstMetric(c.identityAccBalance, prometheus.GaugeValue, b, s)
+	if idBal > 0 {
+		ch <- prometheus.MustNewConstMetric(c.accountBalance, prometheus.GaugeValue, idBal, idBalStr)
+		ch <- prometheus.MustNewConstMetric(c.identityAccBalance, prometheus.GaugeValue, idBal, idBalStr)
 	}
 
-	// get vote account balance
-	vAccBal, err := monitor.GetVoteAccBalance(c.config)
-	// if err != nil {
-	// 	ch <- prometheus.NewInvalidMetric(c.voteAccBalance, err)
-	// } else {
-	if vAccBal.Result.Value != 0 {
-		log.Printf("Vote account bal : %d", vAccBal.Result.Value)
-		b := float64(vAccBal.Result.Value) / math.Pow(10, 9)
-		s := fmt.Sprintf("%.4f", b) // TODO : cross check the value
-		ch <- prometheus.MustNewConstMetric(c.voteAccBalance, prometheus.GaugeValue, b, s)
+	if voteBal > 0 {
+		s := fmt.Sprintf("%.4f", voteBal)
+		ch <- prometheus.MustNewConstMetric(c.voteAccBalance, prometheus.GaugeValue, voteBal, s)
 	}
 
-	// }
-
-	// emit tracked accounts balances
-	for _, addr := range c.config.ValDetails.AccountsToTrackBalance {
-		if addr == "" {
-			continue
-		}
-		bal, err := monitor.GetAccountBalance(c.config, addr)
-		if err != nil {
-			log.Printf("Error while getting tracked account balance for %s: %v", addr, err)
-			continue
-		}
-		if bal.Result.Value >= 0 {
-			b := float64(bal.Result.Value) / math.Pow(10, 9)
-			ch <- prometheus.MustNewConstMetric(c.trackedAccBalance, prometheus.GaugeValue, b, addr)
-		}
+	for addr, bal := range tracked {
+		ch <- prometheus.MustNewConstMetric(c.trackedAccBalance, prometheus.GaugeValue, bal, addr)
 	}
 
-	// get slot leader
-	leader, err := monitor.GetSlotLeader(c.config)
-	if err != nil {
-		ch <- prometheus.NewInvalidMetric(c.slotLeader, err)
-	} else {
-		if leader.Result != "" {
-			ch <- prometheus.MustNewConstMetric(c.slotLeader, prometheus.GaugeValue, 1, leader.Result)
-		}
+	if leader != "" {
+		ch <- prometheus.MustNewConstMetric(c.slotLeader, prometheus.GaugeValue, 1, leader)
 	}
 
-	// get current validator slot
-	slot, err := monitor.GetCurrentSlot(c.config, utils.Validator)
-	if err != nil {
-		log.Printf("Error while getting current sloc info : %v", err)
-	} else {
-		cs := strconv.FormatInt(slot.Result, 10)
-		ch <- prometheus.MustNewConstMetric(c.currentSlot, prometheus.GaugeValue, float64(slot.Result), cs)
+	if vSlot > 0 {
+		cs := strconv.FormatInt(vSlot, 10)
+		ch <- prometheus.MustNewConstMetric(c.currentSlot, prometheus.GaugeValue, float64(vSlot), cs)
 	}
 
-	// Export Confirmed block time of Validator
-	validatorBlocktime := c.getValidatorBlockTime(slot.Result)
-	nowV := time.Unix(validatorBlocktime, 0).UTC()
-	timesV := nowV.Format(time.RFC1123)
-	ch <- prometheus.MustNewConstMetric(c.validatorBlockTime, prometheus.GaugeValue, 1, timesV)
-
-	// Get current Network slot
-	networkSlot, err := monitor.GetCurrentSlot(c.config, utils.Network)
-
-	// Export confirmed block time of Network
-	networkBlocktime := c.getNetworkBlockTime(networkSlot.Result)
-	nowN := time.Unix(networkBlocktime, 0).UTC()
-	timesN := nowN.Format(time.RFC1123)
-	ch <- prometheus.MustNewConstMetric(c.networkBlockTime, prometheus.GaugeValue, 1, timesN)
-
-	// Get confirmed Block Time Difference of Network and Validator
-	secs, ss := blockTimeDiff(networkBlocktime, validatorBlocktime)
-	ch <- prometheus.MustNewConstMetric(c.blockTimeDiff, prometheus.GaugeValue, secs, ss+"s")
-
-	// get block time and calculate block time diff
-	bt, err := monitor.GetBlockTime(slot.Result, c.config)
-	if err != nil {
-		log.Printf("Error while getting block time: %v", err)
+	if vBT > 0 {
+		timesV := time.Unix(vBT, 0).UTC().Format(time.RFC1123)
+		ch <- prometheus.MustNewConstMetric(c.validatorBlockTime, prometheus.GaugeValue, 1, timesV)
+	}
+	if nBT > 0 {
+		timesN := time.Unix(nBT, 0).UTC().Format(time.RFC1123)
+		ch <- prometheus.MustNewConstMetric(c.networkBlockTime, prometheus.GaugeValue, 1, timesN)
+	}
+	if nBT > 0 && vBT > 0 {
+		secs, ss := blockTimeDiff(nBT, vBT)
+		ch <- prometheus.MustNewConstMetric(c.blockTimeDiff, prometheus.GaugeValue, secs, ss+"s")
 	}
 
-	// get previous block time
-	pvt, err := monitor.GetBlockTime(slot.Result-1, c.config)
-	if err != nil {
-		log.Printf("Error while getting previous block time: %v", err)
+	if bt > 0 && pbt > 0 {
+		sec, s := blockTimeDiff(bt, pbt)
+		ch <- prometheus.MustNewConstMetric(c.blockTime, prometheus.GaugeValue, sec, s+"s")
 	}
 
-	// block tim difference
-	sec, s := blockTimeDiff(bt.Result, pvt.Result)
-	ch <- prometheus.MustNewConstMetric(c.blockTime, prometheus.GaugeValue, sec, s+"s")
-
-	// IP address of gossip
-	address := c.getClusterNodeInfo()
 	if address != "" {
 		ch <- prometheus.MustNewConstMetric(c.ipAddress, prometheus.GaugeValue, 1, address)
 	}
 
-	// get tx count
-	count, _ := monitor.GetTxCount(c.config)
-	txcount := utils.NearestThousandFormat(float64(count.Result))
+	if txc > 0 {
+		txcount := utils.NearestThousandFormat(float64(txc))
+		ch <- prometheus.MustNewConstMetric(c.txCount, prometheus.GaugeValue, float64(txc), txcount)
+	}
 
-	ch <- prometheus.MustNewConstMetric(c.txCount, prometheus.GaugeValue, float64(count.Result), txcount)
-
+	dur := time.Since(start)
+	if dur > 200*time.Millisecond {
+		log.Printf("Collect duration: %s", dur.String())
+	}
 }
 
 // getClusterNodeInfo returns gossip address of node
@@ -614,7 +761,9 @@ func (c *solanaCollector) getClusterNodeInfo() string {
 
 // getNetworkVoteAccountinfo returns last vote  information of  network vote account
 func (c *solanaCollector) getNetworkVoteAccountinfo() float64 {
-	resn, _ := monitor.GetVoteAccounts(c.config, utils.Network)
+	c.mu.RLock()
+	resn := c.cachedAccsNetwork
+	c.mu.RUnlock()
 	var outN float64
 	for _, vote := range resn.Result.Current {
 		if vote.NodePubkey == c.config.ValDetails.PubKey {
@@ -627,22 +776,18 @@ func (c *solanaCollector) getNetworkVoteAccountinfo() float64 {
 
 // get confirmed block time of network
 func (c *solanaCollector) getNetworkBlockTime(slot int64) int64 {
-	result, err := monitor.GetConfirmedBlock(c.config, slot, utils.Network)
-	if err != nil {
-		log.Printf("failed to fetch confirmed time of network, retrying: %v", err)
-		// cancel()
-	}
-	return result.Result.BlockTime
+	c.mu.RLock()
+	bt := c.cachedNetworkBlocktime
+	c.mu.RUnlock()
+	return bt
 }
 
 // get confirmed blocktime of validator
 func (c *solanaCollector) getValidatorBlockTime(slot int64) int64 {
-	result, err := monitor.GetConfirmedBlock(c.config, slot, utils.Validator)
-	if err != nil {
-		log.Printf("failed to fetch confirmed time of network, retrying: %v", err)
-		// cancel()
-	}
-	return result.Result.BlockTime
+	c.mu.RLock()
+	bt := c.cachedValidatorBlocktime
+	c.mu.RUnlock()
+	return bt
 }
 
 // blockTimeDiff calculate block time difference
